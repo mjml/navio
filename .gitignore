@@ -1,2 +1,4 @@
 *.o
-nav.io
+*.obj
+navio
+.vscode
