@@ -155,6 +155,19 @@ void examine_window (Window win)
 
 void trap_events ()
 {
+    Window rootwin = DefaultRootWindow(disp);
+ 
+    // replicate each key twice because we "don't care" about Mod2 (numlock)
+    XGrabKey(disp, XKeysymToKeycode(disp,'a'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    XGrabKey(disp, XKeysymToKeycode(disp,'d'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    XGrabKey(disp, XKeysymToKeycode(disp,'s'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    XGrabKey(disp, XKeysymToKeycode(disp,'w'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    XGrabKey(disp, XKeysymToKeycode(disp,'a'), Mod2Mask|Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    XGrabKey(disp, XKeysymToKeycode(disp,'d'), Mod2Mask|Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    XGrabKey(disp, XKeysymToKeycode(disp,'s'), Mod2Mask|Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    XGrabKey(disp, XKeysymToKeycode(disp,'w'), Mod2Mask|Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    XSelectInput(disp,rootwin,KeyPressMask|KeyReleaseMask);
+
 
 }
 
@@ -164,38 +177,10 @@ void run_loop ()
     // respond to events:
     XEvent event;
 
-    Window rootwin = DefaultRootWindow(disp);
-
-    KeySym supersym = XStringToKeysym("Super_L");
-    KeyCode supercode = XKeysymToKeycode(disp,supersym);
-    printf("Super_L keysym is 0x%04lx keycode is 0x%02x\n", supersym, supercode);
-
-    XModifierKeymap* kmap = XGetModifierMapping(disp);
-    XInsertModifiermapEntry(kmap, supercode, Mod4MapIndex);
-    XSetModifierMapping(disp, kmap);
-    XFreeModifiermap(kmap); 
-    kmap = nullptr;
-    
-    auto r = XGrabKey(disp, XKeysymToKeycode(disp,'a'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
-    assert(r);
-
-    r = XGrabKey(disp, XKeysymToKeycode(disp,'d'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
-    assert(r);
-
-    r = XGrabKey(disp, XKeysymToKeycode(disp,'s'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
-    assert(r);
-
-    r = XGrabKey(disp, XKeysymToKeycode(disp,'w'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
-    assert(r);
-
-    XSelectInput(disp,rootwin,KeyPressMask|KeyReleaseMask);
-
-
     while (1) {
 
         // window focus / selection
         XNextEvent(disp, &event);
-        printf("-");
 
         // window move / resize
         if (event.type == ConfigureNotify) {
@@ -254,16 +239,12 @@ void handle_keypress (XKeyPressedEvent& kev)
     unsigned int timestamp = 0;
     if (kev.state & Mod4Mask) {
         if (kev.keycode == 38) { // a
-            printf("a\n");
             move_left(timestamp);
         } else if (kev.keycode == 40) { // d
-            printf("d\n");
             move_right(timestamp);
         } else if (kev.keycode == 39) { // s
-            printf("s\n");
             move_down(timestamp);
         } else if (kev.keycode == 25) { // w
-            printf("w\n");
             move_up(timestamp);
         }
     }
@@ -301,17 +282,18 @@ void move ( unsigned int ts, std::function<int(Point&, Point&)> scorefcn )
     }
     printf("best score is %i, best window is %lu\n", bestscore, bestwin);
 
-    auto desktop = XProp<1,XA_CARDINAL>::get(bestwin,XInternAtom(disp,"_NET_WM_DESKTOP",False));
-    if (!desktop.has_value()) {
-        desktop = XProp<1,XA_CARDINAL>::get(bestwin,XInternAtom(disp,"_WIN_WORKSPACE",False));
-    }
-    if (!desktop.has_value()) {
-        printf("Warning: can't switch desktop.\n");
-    } else {
-        XClientSend(DefaultRootWindow(disp),XInternAtom(disp,"_NET_CURRENT_DESKTOP",False), desktop.value(), 0,0,0,0);
-    }
-
     if (bestwin != 0) {
+
+        auto desktop = XProp<1,XA_CARDINAL>::get(bestwin,XInternAtom(disp,"_NET_WM_DESKTOP",False));
+        if (!desktop.has_value()) {
+            desktop = XProp<1,XA_CARDINAL>::get(bestwin,XInternAtom(disp,"_WIN_WORKSPACE",False));
+        }
+        if (!desktop.has_value()) {
+            printf("Warning: can't switch desktop.\n");
+        } else {
+            XClientSend(DefaultRootWindow(disp),XInternAtom(disp,"_NET_CURRENT_DESKTOP",False), desktop.value(), 0,0,0,0);
+        }
+
         printf("Switching to window 0x%08lx\n", bestwin);
         XClientSend("_NET_ACTIVE_WINDOW", bestwin, 0,0,0,0,0);
         XMapRaised(disp, bestwin);
