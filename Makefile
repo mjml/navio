@@ -19,6 +19,6 @@ clean:
 %.o: %.c
 	$(CC) $(CCFLAGS) -c $^ -o $@
 
-navio: navio.obj
+navio: navio.obj myX11.obj
 	$(CPP) $(LDFLAGS) -o $@ $^
 

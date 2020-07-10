@@ -5,81 +5,53 @@
 #include <X11/keysymdef.h>
 #include <X11/Xmu/WinUtil.h>
 #include <stdio.h>
+#include <algorithm>
 
 #include <cassert>
 #include <list>
 using namespace std;
 
 #include "myX11.hpp"
+#include "navio.hpp"
 
 void build_window_index ();
-void examine_window (int win, std::optional<unsigned int> current_desktop);
+void examine_window (Window win);
 void run_loop ();
 void event_predicate ();
-Atom find_atom (const char* desc);
-void get_win_name (int win, char** buf, int sz);
 
 void handle_configure (XConfigureEvent& cev);
 void handle_visibility (XVisibilityEvent& vev);
 void handle_keypress (XKeyPressedEvent& kev);
 
-/// GLOBALS ///////
-Display* disp = nullptr;
+void move (unsigned int timestamp, std::function<int(Point&, Point&)> scorefcn);
+void move_left(unsigned int timestamp);
+void move_right(unsigned int timestamp);
+void move_up(unsigned int timestamp);
+void move_down(unsigned int timestamp);
 
-/// Atoms
-Atom wm_name;
-Atom net_current_desktop;
-Atom net_wm_state;
-Atom net_virtual_roots;
-Atom state_modal;
-Atom state_sticky;
-Atom state_maximized_vert;
-Atom state_maximized_horiz;
-Atom state_shaded;
-Atom state_skip_taskbar;
-Atom state_skip_pager;
-Atom state_hidden;
-Atom state_fullscreen;
-Atom state_above;
-Atom state_below;
-Atom state_demands_attention;
+WindowGeom wingeo;
+
 
 int main (int argc, char* argv[]) 
 {
-    disp = XOpenDisplay(nullptr);
-    assert(disp != nullptr);
-
-    // Set up the X11 environment and event masks
-    int rootwin = DefaultRootWindow(disp);
-    //int r = XSelectInput(disp, rootwin, KeyPress | VisibilityNotify);
-
-    // Determine the atoms we need
-    wm_name                 = find_atom("WM_NAME");
-    net_current_desktop     = find_atom("_NET_CURRENT_DESKTOP");
-    net_virtual_roots       = find_atom("_NET_VIRTUAL_ROOTS");
-    net_wm_state            = find_atom("_NET_WM_STATE");    
-    state_modal             = find_atom("_NET_WM_STATE_MODAL");
-    state_sticky            = find_atom("_NET_WM_STATE_STICKY");
-    state_maximized_vert    = find_atom("_NET_WM_STATE_MAXIMIZED_VERT");
-    state_maximized_horiz   = find_atom("_NET_WM_STATE_MAXIMIZED_HORZ");
-    state_shaded            = find_atom("_NET_WM_STATE_SHADED");
-    state_skip_taskbar      = find_atom("_NET_WM_STATE_SKIP_TASKBAR");
-    state_skip_pager        = find_atom("_NET_WM_STATE_SKIP_PAGER");
-    state_hidden            = find_atom("_NET_WM_STATE_HIDDEN");
-    state_fullscreen        = find_atom("_NET_WM_STATE_FULLSCREEN");
-    state_above             = find_atom("_NET_WM_STATE_ABOVE");
-    state_below             = find_atom("_NET_WM_STATE_BELOW");
-    state_demands_attention = find_atom("_NET_WM_STATE_DEMANDS_ATTENTION");
+    init_myX11();
 
     build_window_index();
 
-    run_loop(); // runs forever
+    //run_loop(); // runs forever
+    move_left(0);
+
+    while (1) {}
+
+    XCloseDisplay(disp);
 
     return 0;
 }
 
 void build_window_index ()
 {
+    wingeo.clear();
+
     // Get the virtual desktop window (_NET_CURRENT_DESKTOP property of the root window)
     int rootwin = DefaultRootWindow(disp);
     Atom atype;
@@ -88,13 +60,15 @@ void build_window_index ()
     unsigned long bytes = 0;
     unsigned char* prop = nullptr;
 
-    // get the current desktop
-    auto desktop = XProp<1,XA_CARDINAL>::get(rootwin, net_current_desktop);
-    if (desktop.has_value()) {
-        printf("Currently on desktop %u\n", desktop.value());
-    } else {
-        printf("Not a desktop wtf!!!\n");
+    // Find out how nicely our wm plays
+    /*
+    auto net_supported = XInternAtom(disp, "_NET_SUPPORTED", False);
+    auto supatoms = XProp<1024,XA_ATOM>::get(rootwin,net_supported);
+    for (auto atom : supatoms) {
+        printf("WM supports %s\n", XGetAtomName(disp, atom));
     }
+    */
+
 
     // get the children
     Window rootwin2;
@@ -113,14 +87,14 @@ void build_window_index ()
     for (int c=0; c < nchildren; c++) {
         Window topwin;
         topwin = children[c];
-        examine_window(topwin, desktop);
+        examine_window(topwin);
     }
 
     XFree(children);
 
 }
 
-void examine_window (int win, std::optional<unsigned int> current_desktop)
+void examine_window (Window win)
 {
     Atom atype = 0;
     int fmt = 0;
@@ -131,32 +105,20 @@ void examine_window (int win, std::optional<unsigned int> current_desktop)
     bool valid = true;
     bool taskbar = true;
 
-    auto r = XGetWindowProperty(disp, win, wm_name, 0, 1024, False, XA_STRING, &atype, &fmt, &nitems, &nbytes, &prop);
-    assert(r==Success);
-    if(fmt == 8 && atype == XA_STRING) {
-        printf("[%s] ", prop);
-        fflush(stdout);
-    } else {
-        printf("[] ");
-    }
+    int rootwin = DefaultRootWindow(disp);
+    auto current_desktop = XProp<1,XA_CARDINAL>::get(rootwin, net_current_desktop);
+
+    win = XmuClientWindow(disp, win);
 
     auto name = XProp<1,XA_STRING>::get(win,wm_name);
+    auto desktop = XProp<1,XA_CARDINAL>::get(win,wm_desktop);
+
+    fflush(stdout);
 
     if (nitems) {
         XFree(prop);
         prop = nullptr;
     }
-
-    Window client = XmuClientWindow(disp, win);
-
-    r = XGetWindowProperty(disp, win, net_wm_state, 0, 128, False, XA_ATOM, &atype, &fmt, &nitems, &nbytes, &prop);
-    assert(r == Success);
-    if (atype == 0) {
-        printf("\n");
-        return;
-    }
-    assert(atype == XA_ATOM);
-    assert(fmt == 32);
 
     // only consider the windows on the taskbar
     Atom* aa = reinterpret_cast<Atom*>(prop);
@@ -164,7 +126,22 @@ void examine_window (int win, std::optional<unsigned int> current_desktop)
         valid &= !(aa[i] == state_skip_taskbar);
         valid &= !(aa[i] == state_hidden);
     }
-    printf("%s\n", valid ? "task" : "hidden/utility");
+    valid &= !current_desktop.has_value() || current_desktop == desktop;
+    if (valid) {
+        if (name.has_value()) {
+            printf("[%lu, %s 0x%04x] ", win, name.value().c_str(), desktop.value_or(0xffff));
+        } else {
+            printf("[%lu - 0x%04x] ", win, desktop.value_or(0xffff));
+        }
+        
+        Point loc;
+        Window chld;
+        XTranslateCoordinates(disp,win,rootwin,0,0,&loc.x,&loc.y,&chld);
+        wingeo[win] = loc;
+        printf("\n");
+    } else {
+        wingeo.extract(win);
+    }
     
     if (nitems) {
         XFree(prop);
@@ -221,28 +198,102 @@ void handle_configure (XConfigureEvent& cev)
         XFree(children);
     }
 
-    stateWin = XmuClientWindow(disp, win);
-
-    
-
+    win = XmuClientWindow(disp, win);
+    examine_window(win);
     
 }
 
 void handle_visibility (XVisibilityEvent& vev)
 {
-
+    if (vev.state == VisibilityFullyObscured) {
+        wingeo.extract(vev.window);
+    } else {
+        examine_window(vev.window);
+    }
+    
 }
 
 void handle_keypress (XKeyPressedEvent& kev)
 {
+    unsigned int timestamp = 0;
+    if (kev.state & Mod4Mask) {
+        if (kev.keycode == 38) { // a
+            move_left(timestamp);
+        } else if (kev.keycode == 40) { // d
+            move_right(timestamp);
+        } else if (kev.keycode == 39) { // s
+            move_down(timestamp);
+        } else if (kev.keycode == 25) { // w
+            move_up(timestamp);
+        }
+    }
 
 }
 
-Atom find_atom (const char* desc) 
+void move ( unsigned int ts, std::function<int(Point&, Point&)> scorefcn ) 
 {
-    auto r = XInternAtom(disp, desc, False);
-    assert(r != None);
-    return r;
+    int bestscore = 0x7fffffff;
+    Window bestwin = 0;
+
+    // get active window
+    Window rootwin = DefaultRootWindow(disp);
+    auto curwin = XProp<1,XA_WINDOW>::get(rootwin,net_active_window);
+    Point src;
+    if (curwin.has_value()) {
+        Window chld;
+        XTranslateCoordinates(disp,curwin.value(),rootwin,0,0,&src.x,&src.y,&chld);
+    } else {
+        auto vsz = XProp<2,XA_CARDINAL>::get(rootwin, net_desktop_geometry);
+        src.x = vsz[0] / 2;
+        src.y = vsz[1] / 2;
+    }
+
+    // cycle through wingeo looking for the closest distance
+    for (auto it = wingeo.begin(); it != wingeo.end(); it++) {
+        auto win = it->first;
+        auto tgt = it->second;
+        int score = scorefcn(src, tgt);
+        printf("%lu score: %i\n", win, score);
+        if (score >= 0 && score < bestscore && curwin != win) {
+            bestscore = score;
+            bestwin = win;
+        }
+    }
+    printf("best score is %i, best window is %lu\n", bestscore, bestwin);
+
+    auto desktop = XProp<1,XA_CARDINAL>::get(bestwin,XInternAtom(disp,"_NET_WM_DESKTOP",False));
+    if (!desktop.has_value()) {
+        desktop = XProp<1,XA_CARDINAL>::get(bestwin,XInternAtom(disp,"_WIN_WORKSPACE",False));
+    }
+    if (!desktop.has_value()) {
+        printf("Warning: can't switch desktop.\n");
+    } else {
+        XClientSend(DefaultRootWindow(disp),XInternAtom(disp,"_NET_CURRENT_DESKTOP",False), desktop.value(), 0,0,0,0);
+    }
+
+    if (bestwin != 0) {
+        printf("Switching to window 0x%08lx\n", bestwin);
+        XClientSend("_NET_ACTIVE_WINDOW", bestwin, 0,0,0,0,0);
+        XMapRaised(disp, bestwin);
+    }
+
+}
+
+
+void move_left(unsigned int timestamp) {
+    move( timestamp, std::function([](Point& src, Point& tgt) -> int { return (src.x - tgt.x) - abs(src.y - tgt.y); } ));
+}
+
+void move_right(unsigned int timestamp) {
+
+}
+
+void move_down(unsigned int timestamp) {
+
+}
+
+void move_up(unsigned int timestamp) {
+
 }
 
 void get_win_name (int win, char** buf, int sz);
