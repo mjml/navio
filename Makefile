@@ -22,3 +22,5 @@ clean:
 navio: navio.obj myX11.obj
 	$(CPP) $(LDFLAGS) -o $@ $^
 
+test: test.cpp
+	$(CPP) -lX11 -lpthread -o test test.cpp

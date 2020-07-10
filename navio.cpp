@@ -16,6 +16,8 @@ using namespace std;
 
 void build_window_index ();
 void examine_window (Window win);
+void create_sneaky_win ();
+void trap_events ();
 void run_loop ();
 void event_predicate ();
 
@@ -31,6 +33,7 @@ void move_down(unsigned int timestamp);
 
 WindowGeom wingeo;
 
+Window sneakywin = 0;
 
 int main (int argc, char* argv[]) 
 {
@@ -38,10 +41,9 @@ int main (int argc, char* argv[])
 
     build_window_index();
 
-    //run_loop(); // runs forever
-    move_left(0);
+    trap_events ();
 
-    while (1) {}
+    run_loop(); // runs forever
 
     XCloseDisplay(disp);
 
@@ -151,30 +153,64 @@ void examine_window (Window win)
 }
 
 
+void trap_events ()
+{
+
+}
+
+
 void run_loop ()
 {
     // respond to events:
     XEvent event;
 
+    Window rootwin = DefaultRootWindow(disp);
+
+    KeySym supersym = XStringToKeysym("Super_L");
+    KeyCode supercode = XKeysymToKeycode(disp,supersym);
+    printf("Super_L keysym is 0x%04lx keycode is 0x%02x\n", supersym, supercode);
+
+    XModifierKeymap* kmap = XGetModifierMapping(disp);
+    XInsertModifiermapEntry(kmap, supercode, Mod4MapIndex);
+    XSetModifierMapping(disp, kmap);
+    XFreeModifiermap(kmap); 
+    kmap = nullptr;
+    
+    auto r = XGrabKey(disp, XKeysymToKeycode(disp,'a'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    assert(r);
+
+    r = XGrabKey(disp, XKeysymToKeycode(disp,'d'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    assert(r);
+
+    r = XGrabKey(disp, XKeysymToKeycode(disp,'s'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    assert(r);
+
+    r = XGrabKey(disp, XKeysymToKeycode(disp,'w'), Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+    assert(r);
+
+    XSelectInput(disp,rootwin,KeyPressMask|KeyReleaseMask);
+
+
     while (1) {
 
         // window focus / selection
         XNextEvent(disp, &event);
+        printf("-");
 
         // window move / resize
-        if (event.type & ConfigureNotify) {
+        if (event.type == ConfigureNotify) {
             XConfigureEvent cev = event.xconfigure;
             handle_configure(cev);
         }
 
         // window visibility
-        if (event.type & VisibilityNotify) {
+        if (event.type == VisibilityNotify) {
             XVisibilityEvent vev = event.xvisibility;
             handle_visibility(vev);
         }
 
         // key press (window switch commands)
-        if (event.type & KeyPress) {    
+        if (event.type == KeyPress) {    
             XKeyPressedEvent kev = event.xkey;
             handle_keypress(kev);
         }
@@ -192,14 +228,8 @@ void handle_configure (XConfigureEvent& cev)
     Window* children = nullptr;
     unsigned int nchildren;
     
-    int r = XQueryTree(disp, win, &root, &parent, &children, &nchildren);
-    assert(r);
-    if (children) {
-        XFree(children);
-    }
-
-    win = XmuClientWindow(disp, win);
-    examine_window(win);
+    //win = XmuClientWindow(disp, win);
+    //examine_window(win);
     
 }
 
@@ -215,15 +245,25 @@ void handle_visibility (XVisibilityEvent& vev)
 
 void handle_keypress (XKeyPressedEvent& kev)
 {
+    char szstr[2048];
+    KeySym keysym;
+    XComposeStatus cstatus;
+    XLookupString(&kev, szstr, 2047, &keysym, &cstatus);
+    printf("Keyboard event for keysym=0x%04lx  kevstate=0x%08x\n", keysym, kev.state);
+
     unsigned int timestamp = 0;
     if (kev.state & Mod4Mask) {
         if (kev.keycode == 38) { // a
+            printf("a\n");
             move_left(timestamp);
         } else if (kev.keycode == 40) { // d
+            printf("d\n");
             move_right(timestamp);
         } else if (kev.keycode == 39) { // s
+            printf("s\n");
             move_down(timestamp);
         } else if (kev.keycode == 25) { // w
+            printf("w\n");
             move_up(timestamp);
         }
     }
@@ -280,20 +320,23 @@ void move ( unsigned int ts, std::function<int(Point&, Point&)> scorefcn )
 }
 
 
-void move_left(unsigned int timestamp) {
+void move_left(unsigned int timestamp) 
+{
     move( timestamp, std::function([](Point& src, Point& tgt) -> int { return (src.x - tgt.x) - abs(src.y - tgt.y); } ));
 }
 
-void move_right(unsigned int timestamp) {
-
+void move_right(unsigned int timestamp) 
+{
+    move( timestamp, std::function([](Point& src, Point& tgt) -> int { return (tgt.x - src.x) - abs(src.y - tgt.y); } ));
 }
 
-void move_down(unsigned int timestamp) {
-
+void move_down(unsigned int timestamp) 
+{
+    move( timestamp, std::function([](Point& src, Point& tgt) -> int { return (src.y - tgt.y) - abs(src.x - tgt.x); } ));
 }
 
-void move_up(unsigned int timestamp) {
-
+void move_up(unsigned int timestamp) 
+{
+    move( timestamp, std::function([](Point& src, Point& tgt) -> int { return (tgt.y - src.y) - abs(src.y - tgt.y); } ));
 }
 
-void get_win_name (int win, char** buf, int sz);
