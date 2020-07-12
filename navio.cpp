@@ -166,6 +166,7 @@ void trap_events ()
     XGrabKey(disp, XKeysymToKeycode(disp,'d'), Mod2Mask|Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
     XGrabKey(disp, XKeysymToKeycode(disp,'s'), Mod2Mask|Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
     XGrabKey(disp, XKeysymToKeycode(disp,'w'), Mod2Mask|Mod4Mask, rootwin, True, GrabModeAsync, GrabModeAsync);
+
     XSelectInput(disp,rootwin,KeyPressMask|KeyReleaseMask);
 
 
@@ -256,6 +257,8 @@ void move ( unsigned int ts, std::function<int(Point&, Point&)> scorefcn )
     int bestscore = 0x7fffffff;
     Window bestwin = 0;
 
+    build_window_index();
+
     // get active window
     Window rootwin = DefaultRootWindow(disp);
     auto curwin = XProp<1,XA_WINDOW>::get(rootwin,net_active_window);
@@ -275,7 +278,7 @@ void move ( unsigned int ts, std::function<int(Point&, Point&)> scorefcn )
         auto tgt = it->second;
         int score = scorefcn(src, tgt);
         printf("%lu score: %i\n", win, score);
-        if (score >= 0 && score < bestscore && curwin != win) {
+        if (score > 0 && score < bestscore && curwin != win) {
             bestscore = score;
             bestwin = win;
         }
